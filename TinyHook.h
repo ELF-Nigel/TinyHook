@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <psapi.h>
 #include <tlhelp32.h>
 
 #ifdef __cplusplus
@@ -243,6 +244,10 @@ static int hook_module_bounds(const char* module, void** out_base, size_t* out_s
     *out_size = (size_t)mi.SizeOfImage;
     return 1;
 }
+
+// pattern scan with module auto-bounds
+// forward declaration
+static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask);
 
 // pattern scan with module auto-bounds
 static void* hook_pattern_scan_module_auto(const char* module, const uint8_t* pattern, const char* mask) {
