@@ -1,0 +1,21 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: compile c and c++
+        shell: cmd
+        run: |
+          echo #include "TinyHook.h" > test.cpp
+          echo int main(){return 0;} >> test.cpp
+          cl /nologo /W3 /EHsc test.cpp
+          echo #include "TinyHook.h" > test.c
+          echo int main(){return 0;} >> test.c
+          cl /nologo /W3 test.c
