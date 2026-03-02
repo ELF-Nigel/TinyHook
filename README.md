@@ -377,3 +377,19 @@ hook_manager_enable_all(&mgr);
 hook_meta_t meta = {"present", "render", 5, 1000, 0};
 hook_manager_bind_meta_tiny(&hk, &meta);
 ```
+
+## Hook Manager Policies
+```cpp
+hook_manager_policy_t pol = {"render", NULL, 1000};
+hook_manager_tick(&pol);
+```
+
+## Hook Dump
+```cpp
+hook_dump_active();
+```
+
+## Resolver Cache
+```cpp
+void* fn = hook_resolve_symbol_cached("kernel32.dll", "CreateFileW");
+```

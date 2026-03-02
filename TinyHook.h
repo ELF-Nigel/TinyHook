@@ -340,6 +340,16 @@ static int hook_eat_patch(const char* module, const char* name, void* detour, vo
     return 0;
 }
 
+// fnv-1a hash
+static uint32_t hook_hash_fnv1a(const char* s) {
+    uint32_t h = 0x811C9DC5u;
+    while (s && *s) {
+        h ^= (uint8_t)*s++;
+        h *= 0x01000193u;
+    }
+    return h;
+}
+
 static void* hook_resolve_export_hash(const char* module, uint32_t name_crc32) {
     if (!module) return NULL;
     HMODULE mod = GetModuleHandleA(module);
@@ -374,6 +384,31 @@ static void* hook_resolve_export(const char* module, const char* name, uint16_t 
 }
 
 // pdb resolver stub (user integrates dbghelp/symsrv)
+// symbol cache (small)
+typedef struct hook_symbol_cache_t {
+    const char* module;
+    const char* symbol;
+    void* addr;
+} hook_symbol_cache_t;
+
+static hook_symbol_cache_t g_symbol_cache[32];
+
+static void* hook_resolve_symbol_cached(const char* module, const char* symbol) {
+    for (int i = 0; i < 32; ++i) {
+        if (g_symbol_cache[i].module == module && g_symbol_cache[i].symbol == symbol) return g_symbol_cache[i].addr;
+    }
+    void* addr = hook_resolve_symbol(module, symbol);
+    for (int i = 0; i < 32; ++i) {
+        if (!g_symbol_cache[i].module) {
+            g_symbol_cache[i].module = module;
+            g_symbol_cache[i].symbol = symbol;
+            g_symbol_cache[i].addr = addr;
+            break;
+        }
+    }
+    return addr;
+}
+
 static void* hook_resolve_symbol_pdb(const char* module, const char* symbol) {
     return hook_resolve_symbol(module, symbol);
 }
@@ -429,6 +464,19 @@ static int tinyhook_reapply_if_needed(tinyhook_t* h);
 
 // forward declarations (tinyhook)
 static int th_safe_read_ptr(void* addr, void** out);
+// page safety checks
+static int hook_page_is_guarded(void* addr) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery(addr, &mbi, sizeof(mbi))) return 0;
+    return (mbi.Protect & PAGE_GUARD) != 0;
+}
+
+static int hook_page_is_shared(void* addr) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery(addr, &mbi, sizeof(mbi))) return 0;
+    return (mbi.Type == MEM_IMAGE) != 0;
+}
+
 static int th_is_executable_ptr(void* p);
 
 // ------------------------------------------------------------
@@ -1921,6 +1969,40 @@ static int hook_meta_can_run(hook_meta_t* m) {
     return 1;
 }
 
+// hook manager policies and telemetry
+typedef struct hook_manager_policy_t {
+    const char* allow_category;
+    const char* deny_category;
+    int enable_every_ms;
+} hook_manager_policy_t;
+
+typedef struct hook_telemetry_t {
+    volatile LONG enabled_count;
+    volatile LONG disabled_count;
+    volatile LONG reapply_count;
+} hook_telemetry_t;
+
+static hook_telemetry_t g_hook_telemetry = {0};
+
+static int hook_manager_category_allowed(const char* cat, hook_manager_policy_t* pol) {
+    if (!pol) return 1;
+    if (pol->deny_category && cat && _stricmp(cat, pol->deny_category) == 0) return 0;
+    if (!pol->allow_category) return 1;
+    return cat && _stricmp(cat, pol->allow_category) == 0;
+}
+
+static void hook_manager_tick(hook_manager_policy_t* pol) {
+    if (!pol || pol->enable_every_ms <= 0) return;
+    static uint64_t last = 0;
+    uint64_t now = hook_get_tick_ms();
+    if (now - last >= (uint64_t)pol->enable_every_ms) {
+        last = now;
+        tinyhook_registry_enable_all();
+        vmt_registry_enable_all();
+        InterlockedIncrement(&g_hook_telemetry.enabled_count);
+    }
+}
+
 typedef struct hook_manager_t {
     int watchdog_enabled;
     int suspend_threads;
@@ -1969,6 +2051,22 @@ static void hook_manager_destroy_all(hook_manager_t* m) {
     hook_watchdog_stop();
     tinyhook_registry_destroy_all();
     vmt_registry_destroy_all();
+}
+
+// dump active hooks to logger
+static void hook_dump_active(void) {
+    tinyhook_registry_t* tr = tinyhook_registry_instance();
+    AcquireSRWLockShared(&tr->lock);
+    for (size_t i = 0; i < tr->count; ++i) {
+        hook_logf("tinyhook", "hook[%u]=%p detour=%p", (unsigned)i, tr->hooks[i]->target, tr->hooks[i]->detour);
+    }
+    ReleaseSRWLockShared(&tr->lock);
+    vmt_registry_t* vr = vmt_registry_instance();
+    AcquireSRWLockShared(&vr->lock);
+    for (size_t i = 0; i < vr->count; ++i) {
+        hook_logf("vmt", "hook[%u]=%p index=%u", (unsigned)i, vr->hooks[i]->obj, (unsigned)vr->hooks[i]->index);
+    }
+    ReleaseSRWLockShared(&vr->lock);
 }
 
 static void hook_on_dll_detach(void) {
