@@ -125,3 +125,42 @@ Telegram: ELF_Nigel
 ### Optional DXGI/DX12
 - Enable with `#define VMT_DXGI_HELPERS` / `#define VMT_DX12_HELPERS`
 - Dummy swapchain helpers + index resolution + auto hook helpers
+
+## Usage Guides
+### Unity IL2CPP (AOT)
+- prefer hooking the entry stub with `TH_FLAG_VERIFY_STUB | TH_FLAG_RESOLVE_CHAIN`.
+- use `TH_FLAG_SUSPEND_THREADS` if patching at runtime.
+- if you need the real implementation, use `tinyhook_auto_chain(..., hook_final=1, ...)`.
+
+Example:
+```cpp
+void* target = (void*)0x12345678; // il2cpp stub
+th_status_t st = tinyhook_create_ex(&hk, target, detour,
+    TH_FLAG_VERIFY_STUB | TH_FLAG_RESOLVE_CHAIN | TH_FLAG_VERIFY_EXEC | TH_FLAG_SUSPEND_THREADS);
+```
+
+### Unreal (D3D11/D3D12 present)
+- prefer vmt hooking for swapchain `Present` and `ResizeBuffers`.
+- use the dxgi/dx12 helper to resolve indices safely.
+
+D3D11 example:
+```cpp
+#define VMT_DXGI_HELPERS
+#include "TinyHook.h"
+size_t present = 0, resize = 0;
+if (vmt_dxgi_resolve_indices_for_swapchain(sc, &present, &resize)) {
+    vmt_hook_create(&hp, sc, present, (void*)hkPresent);
+    vmt_hook_enable(&hp);
+}
+```
+
+D3D12 example:
+```cpp
+#define VMT_DX12_HELPERS
+#include "TinyHook.h"
+size_t present = 0, resize = 0;
+if (vmt_dx12_resolve_indices_for_swapchain(sc3, &present, &resize)) {
+    vmt_hook_create(&hp, sc3, present, (void*)hkPresent);
+    vmt_hook_enable(&hp);
+}
+```
