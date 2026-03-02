@@ -19,3 +19,8 @@ jobs:
           echo #include "TinyHook.h" > test.c
           echo int main(){return 0;} >> test.c
           cl /nologo /W3 test.c
+          echo #define VMT_DXGI_HELPERS > test_features.cpp
+          echo #define VMT_DX12_HELPERS >> test_features.cpp
+          echo #include "TinyHook.h" >> test_features.cpp
+          echo int main(){ return 0; } >> test_features.cpp
+          cl /nologo /W3 /EHsc test_features.cpp
