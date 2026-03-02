@@ -47,6 +47,81 @@ static void hook_reentry_leave(void) {
     g_hook_reentry = 0;
 }
 
+// simple detour chain container (user manages call order)
+typedef struct hook_chain_t {
+    void** detours;
+    size_t count;
+    size_t cap;
+} hook_chain_t;
+
+static int hook_chain_add(hook_chain_t* c, void* detour) {
+    if (!c || !detour) return 0;
+    if (c->count == c->cap) {
+        size_t ncap = c->cap ? c->cap * 2 : 4;
+        void** n = (void**)HeapReAlloc(GetProcessHeap(), 0, c->detours, ncap * sizeof(void*));
+        if (!n) return 0;
+        c->detours = n;
+        c->cap = ncap;
+    }
+    c->detours[c->count++] = detour;
+    return 1;
+}
+
+static int hook_chain_remove(hook_chain_t* c, void* detour) {
+    if (!c || !detour) return 0;
+    for (size_t i = 0; i < c->count; ++i) {
+        if (c->detours[i] == detour) {
+            c->detours[i] = c->detours[c->count - 1];
+            c->count--;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void hook_chain_destroy(hook_chain_t* c) {
+    if (!c) return;
+    if (c->detours) HeapFree(GetProcessHeap(), 0, c->detours);
+    c->detours = NULL;
+    c->count = 0;
+    c->cap = 0;
+}
+
+// module allow/deny list
+static HMODULE hook_module_allowlist[32];
+static size_t hook_module_allowlist_count = 0;
+static HMODULE hook_module_denylist[32];
+static size_t hook_module_denylist_count = 0;
+
+static int hook_allow_module(HMODULE mod) {
+    if (!mod || hook_module_allowlist_count >= 32) return 0;
+    hook_module_allowlist[hook_module_allowlist_count++] = mod;
+    return 1;
+}
+
+static int hook_deny_module(HMODULE mod) {
+    if (!mod || hook_module_denylist_count >= 32) return 0;
+    hook_module_denylist[hook_module_denylist_count++] = mod;
+    return 1;
+}
+
+static int hook_is_module_allowed(void* addr) {
+    if (!addr) return 0;
+    HMODULE mod = NULL;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)addr, &mod)) {
+        return 0;
+    }
+    for (size_t i = 0; i < hook_module_denylist_count; ++i) {
+        if (hook_module_denylist[i] == mod) return 0;
+    }
+    if (hook_module_allowlist_count == 0) return 1;
+    for (size_t i = 0; i < hook_module_allowlist_count; ++i) {
+        if (hook_module_allowlist[i] == mod) return 1;
+    }
+    return 0;
+}
+
 typedef void (*hook_log_fn)(const char* tag, const char* msg);
 
 static hook_log_fn g_hook_log = NULL;
@@ -60,6 +135,15 @@ static void hook_log(const char* tag, const char* msg) {
 }
 
 // call this from dllmain to auto-disable hooks on detach
+// optional symbol resolver (dbghelp)
+static void* hook_resolve_symbol(const char* module, const char* symbol) {
+    if (!module || !symbol) return NULL;
+    HMODULE mod = GetModuleHandleA(module);
+    if (!mod) return NULL;
+    FARPROC p = GetProcAddress(mod, symbol);
+    return (void*)p;
+}
+
 static void hook_logf(const char* tag, const char* fmt, ...) {
     if (!g_hook_log || !fmt) return;
     char buf[512];
@@ -95,6 +179,7 @@ typedef struct tinyhook_t {
     uint8_t original[5]; // saved bytes
     uint32_t flags;
     int enabled;
+    int priority;
 } tinyhook_t;
 
 // forward declarations (tinyhook)
@@ -649,6 +734,21 @@ static int tinyhook_registry_remove(tinyhook_t* h) {
     return 0;
 }
 
+// enable hooks by priority (low to high)
+static void tinyhook_registry_enable_all_priority(void) {
+    tinyhook_registry_t* r = tinyhook_registry_instance();
+    AcquireSRWLockShared(&r->lock);
+    // simple selection sort by priority
+    for (size_t i = 0; i < r->count; ++i) {
+        size_t best = i;
+        for (size_t j = i + 1; j < r->count; ++j) {
+            if (r->hooks[j]->priority < r->hooks[best]->priority) best = j;
+        }
+        tinyhook_enable(r->hooks[best]);
+    }
+    ReleaseSRWLockShared(&r->lock);
+}
+
 static void tinyhook_registry_enable_all(void) {
     tinyhook_registry_t* r = tinyhook_registry_instance();
     AcquireSRWLockShared(&r->lock);
@@ -724,6 +824,14 @@ static size_t tinyhook_batch(tinyhook_t* hooks, void** targets, void** detours, 
     return ok;
 }
 
+// hot-reload tinyhook (detour change)
+static int tinyhook_hot_reload(tinyhook_t* h, void* new_detour, uint32_t flags) {
+    if (!h || !h->target || !new_detour) return 0;
+    tinyhook_disable(h);
+    tinyhook_destroy(h);
+    return tinyhook_auto(h, h->target, new_detour, flags, 0) == TH_OK;
+}
+
 static void tinyhook_auto_unhook(tinyhook_t* h, int remove_from_registry) {
     if (!h) return;
     if (remove_from_registry) tinyhook_registry_remove(h);
@@ -758,6 +866,7 @@ typedef struct vmt_hook_t {
     void*   original; // original function pointer
     void*   detour;   // replacement function pointer
     int     enabled;
+    int     priority;
 } vmt_hook_t;
 
 typedef struct vmt_shadow_t {
@@ -1146,6 +1255,14 @@ static int vmt_verify_entry(vmt_hook_t* h, void* expected) {
     return h->vtable[h->index] == expected;
 }
 
+// hot-reload vmt hook (detour change)
+static int vmt_hook_hot_reload(vmt_hook_t* h, void* new_detour, int suspend_threads) {
+    if (!h || !h->obj || !new_detour) return 0;
+    vmt_hook_disable_ex(h, suspend_threads);
+    h->detour = new_detour;
+    return vmt_hook_enable_ex(h, suspend_threads);
+}
+
 static int vmt_hook_auto_ex(vmt_hook_t* h, void* obj, void* fn, size_t max_scan, void* detour, int add_to_registry, int suspend_threads) {
     if (!vmt_hook_create_by_ptr(h, obj, fn, max_scan, detour)) return 0;
     if (!vmt_hook_enable_guarded_ex(h, h->original, suspend_threads)) return 0;
@@ -1325,6 +1442,20 @@ static int vmt_registry_remove(vmt_hook_t* h) {
     }
     ReleaseSRWLockExclusive(&r->lock);
     return 0;
+}
+
+// enable vmt hooks by priority (low to high)
+static void vmt_registry_enable_all_priority(void) {
+    vmt_registry_t* r = vmt_registry_instance();
+    AcquireSRWLockShared(&r->lock);
+    for (size_t i = 0; i < r->count; ++i) {
+        size_t best = i;
+        for (size_t j = i + 1; j < r->count; ++j) {
+            if (r->hooks[j]->priority < r->hooks[best]->priority) best = j;
+        }
+        vmt_hook_enable(r->hooks[best]);
+    }
+    ReleaseSRWLockShared(&r->lock);
 }
 
 static void vmt_registry_enable_all(void) {

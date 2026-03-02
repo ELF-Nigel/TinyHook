@@ -6,6 +6,11 @@ Single-header TinyHook + VMT hook utilities for Windows x64.
 - `TinyHook.h` — single header with all features
 
 ## Features
+- hook priority system
+- multi-detour chaining container
+- hot-reloadable hooks
+- module allow/deny lists
+- symbol resolver (GetProcAddress)
 - crc32 helpers for integrity checks
 - self-healing hooks (reapply if overwritten)
 - reentrancy guard helpers
@@ -101,6 +106,7 @@ Discord: chefendpoint
 Telegram: ELF_Nigel
 
 ## Changelog
+- 2026-03-02: added priority system, chaining, hot-reload, allow/deny list, symbol resolver.
 - 2026-03-02: initial public release (single header + docs).
 - 2026-03-02: improved logging and diagnostics.
 
