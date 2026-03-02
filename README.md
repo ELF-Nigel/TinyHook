@@ -6,6 +6,12 @@ Single-header TinyHook + VMT hook utilities for Windows x64.
 - `TinyHook.h` — single header with all features
 
 ## Features
+- crc32 helpers for integrity checks
+- self-healing hooks (reapply if overwritten)
+- reentrancy guard helpers
+- lazy install helper
+- pattern scan helper
+- auto-disable on dll detach
 - 5-byte rel32 patching with near relay stubs
 - IL2CPP/AOT stub chain resolution
 - optional thread suspension during patching
@@ -191,3 +197,44 @@ Example:
 4. install hooks (tinyhook/vmt) with thread suspend if needed.
 5. verify with logger and sanity checks.
 6. uninstall cleanly on detach.
+
+## Integrity Checks
+```cpp
+uint32_t before = tinyhook_crc32_target5(target);
+// install hook
+uint32_t after = tinyhook_crc32_target5(target);
+```
+
+## Self-Healing
+```cpp
+// periodically call this
+if (!tinyhook_verify_installed(&hk)) {
+    tinyhook_reapply_if_needed(&hk);
+}
+```
+
+## Reentrancy Guard
+```cpp
+if (!hook_reentry_enter()) return;
+// do work
+hook_reentry_leave();
+```
+
+## Lazy Install
+```cpp
+static volatile LONG g_guard = 0;
+if (tinyhook_lazy_install(&g_guard, &hk, target, detour, tinyhook_default_flags())) {
+    // installed once
+}
+```
+
+## Pattern Scan
+```cpp
+void* fn = hook_pattern_scan_module(base, size, pattern, mask);
+```
+
+## Dll Detach Cleanup
+```cpp
+// call from dllmain
+hook_on_dll_detach();
+```

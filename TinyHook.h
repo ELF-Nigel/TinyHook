@@ -34,6 +34,19 @@ typedef enum th_status_t {
     TH_ERR_NOT_EXEC
 } th_status_t;
 
+// simple thread-local reentrancy guard
+static __declspec(thread) int g_hook_reentry = 0;
+
+static int hook_reentry_enter(void) {
+    if (g_hook_reentry) return 0;
+    g_hook_reentry = 1;
+    return 1;
+}
+
+static void hook_reentry_leave(void) {
+    g_hook_reentry = 0;
+}
+
 typedef void (*hook_log_fn)(const char* tag, const char* msg);
 
 static hook_log_fn g_hook_log = NULL;
@@ -44,6 +57,12 @@ static void hook_set_logger(hook_log_fn fn) {
 
 static void hook_log(const char* tag, const char* msg) {
     if (g_hook_log) g_hook_log(tag, msg);
+}
+
+// call this from dllmain to auto-disable hooks on detach
+static void hook_on_dll_detach(void) {
+    tinyhook_registry_disable_all();
+    vmt_registry_disable_all();
 }
 
 static void hook_logf(const char* tag, const char* fmt, ...) {
@@ -88,6 +107,44 @@ static int th_safe_read_ptr(void* addr, void** out);
 static int th_is_executable_ptr(void* p);
 
 // ------------------------------------------------------------
+// crc32 (ieee)
+static uint32_t tinyhook_crc32(const void* data, size_t len) {
+    const uint8_t* p = (const uint8_t*)data;
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= p[i];
+        for (int k = 0; k < 8; ++k) {
+            uint32_t mask = (uint32_t)(-(int)(crc & 1u));
+            crc = (crc >> 1) ^ (0xEDB88320u & mask);
+        }
+    }
+    return ~crc;
+}
+
+static uint32_t tinyhook_crc32_target5(void* target) {
+    if (!target) return 0;
+    return tinyhook_crc32(target, 5);
+}
+
+// generic module pattern scan
+static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask) {
+    if (!module_base || !module_size || !pattern || !mask) return NULL;
+    size_t pat_len = 0;
+    while (mask[pat_len]) pat_len++;
+    if (!pat_len || pat_len > module_size) return NULL;
+
+    uint8_t* base = (uint8_t*)module_base;
+    size_t limit = module_size - pat_len;
+    for (size_t i = 0; i <= limit; ++i) {
+        size_t j = 0;
+        for (; j < pat_len; ++j) {
+            if (mask[j] == 'x' && base[i + j] != pattern[j]) break;
+        }
+        if (j == pat_len) return base + i;
+    }
+    return NULL;
+}
+
 // helpers
 // ------------------------------------------------------------
 static inline int th_rel32_fit(void* src, void* dst) {
@@ -1088,6 +1145,12 @@ static size_t vmt_hook_batch(void* obj, const size_t* indices, void** detours, v
 }
 
 // vmt_hook_auto_ex helper
+// verify vmt entry still matches expected pointer
+static int vmt_verify_entry(vmt_hook_t* h, void* expected) {
+    if (!h || !h->vtable) return 0;
+    return h->vtable[h->index] == expected;
+}
+
 static int vmt_hook_auto_ex(vmt_hook_t* h, void* obj, void* fn, size_t max_scan, void* detour, int add_to_registry, int suspend_threads) {
     if (!vmt_hook_create_by_ptr(h, obj, fn, max_scan, detour)) return 0;
     if (!vmt_hook_enable_guarded_ex(h, h->original, suspend_threads)) return 0;
