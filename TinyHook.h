@@ -1,4 +1,4 @@
-// TinyHook.h - tinyhook + vmt hook (single header)
+// tinyhook.h - tinyhook + vmt hook (single header)
 // credits: discord: chefendpoint | telegram: elf_nigel
 
 #pragma once
@@ -15,6 +15,8 @@
 #include <windows.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <tlhelp32.h>
 
 #ifdef __cplusplus
@@ -42,6 +44,16 @@ static void hook_set_logger(hook_log_fn fn) {
 
 static void hook_log(const char* tag, const char* msg) {
     if (g_hook_log) g_hook_log(tag, msg);
+}
+
+static void hook_logf(const char* tag, const char* fmt, ...) {
+    if (!g_hook_log || !fmt) return;
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    g_hook_log(tag, buf);
 }
 
 typedef enum th_stub_kind_t {
@@ -679,6 +691,8 @@ static void tinyhook_auto_unhook(tinyhook_t* h, int remove_from_registry) {
 #include <windows.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <psapi.h>
 
 #ifdef __cplusplus
@@ -1033,7 +1047,7 @@ static int vmt_hook_create_checked(vmt_hook_t* h, void* obj, size_t index, void*
 
 // guarded enable with optional thread suspension
 static int vmt_hook_enable_guarded_ex(vmt_hook_t* h, void* expected_original, int suspend_threads) {
-    if (!h || !h->vtable) return 0;
+    if (!h || !h->vtable) { hook_log("vmt", "hook invalid args"); return 0; }
     if (h->enabled) return 1;
     if (h->vtable[h->index] != expected_original) return 0;
     return vmt_hook_enable_ex(h, suspend_threads);
@@ -1083,7 +1097,7 @@ static int vmt_hook_auto_ex(vmt_hook_t* h, void* obj, void* fn, size_t max_scan,
 
 // enable hook only if current vtable entry matches expected pointer
 static int vmt_hook_enable_guarded(vmt_hook_t* h, void* expected_original) {
-    if (!h || !h->vtable) return 0;
+    if (!h || !h->vtable) { hook_log("vmt", "hook invalid args"); return 0; }
     if (h->enabled) return 1;
     if (h->vtable[h->index] != expected_original) return 0;
     return vmt_hook_enable(h);
@@ -1124,7 +1138,7 @@ static int vmt_shadow_hook(vmt_shadow_t* s, size_t index, void* detour, void** o
 // swap object's vtable to shadow.
 // swap object's vtable to shadow with optional thread suspension
 static int vmt_shadow_enable_ex(vmt_shadow_t* s, int suspend_threads) {
-    if (!s || !s->obj || !s->shadow) return 0;
+    if (!s || !s->obj || !s->shadow) { hook_log("vmt", "shadow invalid args"); return 0; }
     if (s->enabled) return 1;
 
     vmt_threads_t threads = {0};
@@ -1140,12 +1154,13 @@ static int vmt_shadow_enable_ex(vmt_shadow_t* s, int suspend_threads) {
     FlushInstructionCache(GetCurrentProcess(), s->obj, sizeof(void*));
     if (threads.handles) { hook_log("vmt", "resuming threads"); vmt_resume_threads(&threads); }
     s->enabled = 1;
+    hook_log("vmt", "shadow enabled");
     return 1;
 }
 
 // restore object's original vtable with optional thread suspension
 static int vmt_shadow_disable_ex(vmt_shadow_t* s, int suspend_threads) {
-    if (!s || !s->obj || !s->original) return 0;
+    if (!s || !s->obj || !s->original) { hook_log("vmt", "shadow invalid args"); return 0; }
     if (!s->enabled) return 1;
 
     vmt_threads_t threads = {0};
@@ -1161,12 +1176,13 @@ static int vmt_shadow_disable_ex(vmt_shadow_t* s, int suspend_threads) {
     FlushInstructionCache(GetCurrentProcess(), s->obj, sizeof(void*));
     if (threads.handles) { hook_log("vmt", "resuming threads"); vmt_resume_threads(&threads); }
     s->enabled = 0;
+    hook_log("vmt", "shadow disabled");
     return 1;
 }
 
 // vmt_shadow_enable helper
 static int vmt_shadow_enable(vmt_shadow_t* s) {
-    if (!s || !s->obj || !s->shadow) return 0;
+    if (!s || !s->obj || !s->shadow) { hook_log("vmt", "shadow invalid args"); return 0; }
     if (s->enabled) return 1;
 
     DWORD old;
@@ -1177,12 +1193,13 @@ static int vmt_shadow_enable(vmt_shadow_t* s) {
     VirtualProtect(s->obj, sizeof(void*), old, &old);
     FlushInstructionCache(GetCurrentProcess(), s->obj, sizeof(void*));
     s->enabled = 1;
+    hook_log("vmt", "shadow enabled");
     return 1;
 }
 
 // restore object's original vtable.
 static int vmt_shadow_disable(vmt_shadow_t* s) {
-    if (!s || !s->obj || !s->original) return 0;
+    if (!s || !s->obj || !s->original) { hook_log("vmt", "shadow invalid args"); return 0; }
     if (!s->enabled) return 1;
 
     DWORD old;
@@ -1193,6 +1210,7 @@ static int vmt_shadow_disable(vmt_shadow_t* s) {
     VirtualProtect(s->obj, sizeof(void*), old, &old);
     FlushInstructionCache(GetCurrentProcess(), s->obj, sizeof(void*));
     s->enabled = 0;
+    hook_log("vmt", "shadow disabled");
     return 1;
 }
 
@@ -1303,7 +1321,7 @@ static int vmt_dxgi_create_dummy_swapchain(vmt_dxgi_dummy_t* out) {
     HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "VMT_DXGI_DUMMY",
                                 WS_OVERLAPPEDWINDOW, 0, 0, 100, 100,
                                 NULL, NULL, wc.hInstance, NULL);
-    if (!hwnd) return 0;
+    if (!hwnd) { hook_log("dxgi", "create window failed"); return 0; }
 
     DXGI_SWAP_CHAIN_DESC sd;
     ZeroMemory(&sd, sizeof(sd));
@@ -1324,6 +1342,7 @@ static int vmt_dxgi_create_dummy_swapchain(vmt_dxgi_dummy_t* out) {
         NULL, 0, D3D11_SDK_VERSION, &sd, &sc, &dev, &fl, &ctx);
 
     if (FAILED(hr) || !sc) {
+        hook_log("dxgi", "create swapchain failed");
         DestroyWindow(hwnd);
         return 0;
     }
@@ -1459,16 +1478,18 @@ static int vmt_dx12_create_dummy_swapchain(vmt_dx12_dummy_t* out) {
     HWND hwnd = CreateWindowExA(0, wc.lpszClassName, "VMT_DX12_DUMMY",
                                 WS_OVERLAPPEDWINDOW, 0, 0, 100, 100,
                                 NULL, NULL, wc.hInstance, NULL);
-    if (!hwnd) return 0;
+    if (!hwnd) { hook_log("dxgi", "create window failed"); return 0; }
 
     IDXGIFactory4* factory = NULL;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+        hook_log("dx12", "create factory failed");
         DestroyWindow(hwnd);
         return 0;
     }
 
     ID3D12Device* dev = NULL;
     if (FAILED(D3D12CreateDevice(NULL, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&dev)))) {
+        hook_log("dx12", "create device failed");
         factory->Release();
         DestroyWindow(hwnd);
         return 0;
@@ -1479,6 +1500,7 @@ static int vmt_dx12_create_dummy_swapchain(vmt_dx12_dummy_t* out) {
     qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     ID3D12CommandQueue* queue = NULL;
     if (FAILED(dev->CreateCommandQueue(&qd, IID_PPV_ARGS(&queue)))) {
+        hook_log("dx12", "create queue failed");
         dev->Release();
         factory->Release();
         DestroyWindow(hwnd);
@@ -1619,19 +1641,20 @@ static int vmt_dx12_hook_swapchain_shadow(IDXGISwapChain3* sc,
 
 // vmt_hook_create helper
 static int vmt_hook_create(vmt_hook_t* h, void* obj, size_t index, void* detour) {
-    if (!h || !obj || !detour) return 0;
+    if (!h || !obj || !detour) { hook_log("vmt", "create invalid args"); return 0; }
     h->obj = (void***)obj;
     h->vtable = *(void***)obj;
     h->index = index;
     h->detour = detour;
     h->original = h->vtable[index];
     h->enabled = 0;
+    hook_log("vmt", "hook created");
     return 1;
 }
 
 // enable hook with optional thread suspension
 static int vmt_hook_enable_ex(vmt_hook_t* h, int suspend_threads) {
-    if (!h || !h->vtable) return 0;
+    if (!h || !h->vtable) { hook_log("vmt", "hook invalid args"); return 0; }
     if (h->enabled) return 1;
 
     vmt_threads_t threads = {0};
@@ -1648,12 +1671,13 @@ static int vmt_hook_enable_ex(vmt_hook_t* h, int suspend_threads) {
     FlushInstructionCache(GetCurrentProcess(), &h->vtable[h->index], sizeof(void*));
     if (threads.handles) { hook_log("vmt", "resuming threads"); vmt_resume_threads(&threads); }
     h->enabled = 1;
+    hook_log("vmt", "hook enabled");
     return 1;
 }
 
 // disable hook with optional thread suspension
 static int vmt_hook_disable_ex(vmt_hook_t* h, int suspend_threads) {
-    if (!h || !h->vtable) return 0;
+    if (!h || !h->vtable) { hook_log("vmt", "hook invalid args"); return 0; }
     if (!h->enabled) return 1;
 
     vmt_threads_t threads = {0};
@@ -1670,12 +1694,13 @@ static int vmt_hook_disable_ex(vmt_hook_t* h, int suspend_threads) {
     FlushInstructionCache(GetCurrentProcess(), &h->vtable[h->index], sizeof(void*));
     if (threads.handles) { hook_log("vmt", "resuming threads"); vmt_resume_threads(&threads); }
     h->enabled = 0;
+    hook_log("vmt", "hook disabled");
     return 1;
 }
 
 // vmt_hook_enable helper
 static int vmt_hook_enable(vmt_hook_t* h) {
-    if (!h || !h->vtable) return 0;
+    if (!h || !h->vtable) { hook_log("vmt", "hook invalid args"); return 0; }
     if (h->enabled) return 1;
 
     DWORD old;
@@ -1687,12 +1712,13 @@ static int vmt_hook_enable(vmt_hook_t* h) {
     VirtualProtect(&h->vtable[h->index], sizeof(void*), old, &old);
     FlushInstructionCache(GetCurrentProcess(), &h->vtable[h->index], sizeof(void*));
     h->enabled = 1;
+    hook_log("vmt", "hook enabled");
     return 1;
 }
 
 // vmt_hook_disable helper
 static int vmt_hook_disable(vmt_hook_t* h) {
-    if (!h || !h->vtable) return 0;
+    if (!h || !h->vtable) { hook_log("vmt", "hook invalid args"); return 0; }
     if (!h->enabled) return 1;
 
     DWORD old;
@@ -1704,6 +1730,7 @@ static int vmt_hook_disable(vmt_hook_t* h) {
     VirtualProtect(&h->vtable[h->index], sizeof(void*), old, &old);
     FlushInstructionCache(GetCurrentProcess(), &h->vtable[h->index], sizeof(void*));
     h->enabled = 0;
+    hook_log("vmt", "hook disabled");
     return 1;
 }
 

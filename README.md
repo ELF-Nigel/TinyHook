@@ -85,6 +85,9 @@ Provides helpers to create dummy swapchains and auto-resolve indices.
 hook_set_logger([](const char* tag, const char* msg){
     // your logging here
 });
+
+// formatted logging
+hook_logf("tinyhook", "status=%s", tinyhook_status_str(st));
 ```
 
 ## Credits
