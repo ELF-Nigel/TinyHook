@@ -292,3 +292,33 @@ HMODULE h = hook_wait_for_module("game.dll", 100, 50);
 HMODULE mods[256];
 size_t count = hook_enum_modules(mods, 256);
 ```
+
+## Additional Hook Concepts
+### IAT Hooking
+```cpp
+void** entry = hook_find_iat_entry("game.exe", "kernel32.dll", "CreateFileW");
+void* orig = NULL;
+hook_iat_patch(entry, (void*)MyCreateFileW, &orig);
+```
+
+### VEH / Guard Page (stub)
+```cpp
+void* h = hook_install_veh();
+// configure guard pages yourself
+hook_remove_veh(h);
+```
+
+### Hardware Breakpoint (thread-local)
+```cpp
+hook_hw_breakpoint_set(GetCurrentThread(), target);
+```
+
+## Advanced Checks
+```cpp
+uint32_t crc = hook_crc_section("game.dll", ".text");
+```
+
+## Self Resolution
+```cpp
+void* fn = hook_rescan_after_module("game.dll", pattern, mask, 200, 50);
+```

@@ -89,6 +89,12 @@ static void hook_chain_destroy(hook_chain_t* c) {
     c->cap = 0;
 }
 
+// chain call-next helper (user handles casting)
+static void* hook_chain_call_next(hook_chain_t* c, size_t* idx) {
+    if (!c || !idx || *idx >= c->count) return NULL;
+    return c->detours[(*idx)++];
+}
+
 // module allow/deny list
 static HMODULE hook_module_allowlist[32];
 static size_t hook_module_allowlist_count = 0;
@@ -140,6 +146,81 @@ static void* hook_unreal_resolve_function(hook_unreal_resolver_fn fn, const char
     return fn(object_path, function_name);
 }
 
+// iat hook helpers
+static void** hook_find_iat_entry(const char* module, const char* import_mod, const char* func) {
+    HMODULE h = GetModuleHandleA(module);
+    if (!h) return NULL;
+    uint8_t* base = (uint8_t*)h;
+    IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return NULL;
+    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir.VirtualAddress) return NULL;
+    IMAGE_IMPORT_DESCRIPTOR* imp = (IMAGE_IMPORT_DESCRIPTOR*)(base + dir.VirtualAddress);
+    for (; imp->Name; ++imp) {
+        const char* name = (const char*)(base + imp->Name);
+        if (_stricmp(name, import_mod) != 0) continue;
+        IMAGE_THUNK_DATA* thunk = (IMAGE_THUNK_DATA*)(base + imp->FirstThunk);
+        IMAGE_THUNK_DATA* orig = (IMAGE_THUNK_DATA*)(base + imp->OriginalFirstThunk);
+        for (; orig->u1.AddressOfData; ++orig, ++thunk) {
+            if (orig->u1.Ordinal & IMAGE_ORDINAL_FLAG) continue;
+            IMAGE_IMPORT_BY_NAME* ibn = (IMAGE_IMPORT_BY_NAME*)(base + orig->u1.AddressOfData);
+            if (strcmp((char*)ibn->Name, func) == 0) {
+                return (void**)&thunk->u1.Function;
+            }
+        }
+    }
+    return NULL;
+}
+
+static int hook_iat_patch(void** entry, void* detour, void** out_original) {
+    if (!entry || !detour) return 0;
+    DWORD old;
+    if (!VirtualProtect(entry, sizeof(void*), PAGE_READWRITE, &old)) return 0;
+    if (out_original) *out_original = *entry;
+    *entry = detour;
+    VirtualProtect(entry, sizeof(void*), old, &old);
+    FlushInstructionCache(GetCurrentProcess(), entry, sizeof(void*));
+    return 1;
+}
+
+// veh/guard page hook (simplified)
+static LONG CALLBACK hook_veh_guard(EXCEPTION_POINTERS* ep) {
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void* hook_install_veh(void) {
+    return AddVectoredExceptionHandler(1, hook_veh_guard);
+}
+
+static void hook_remove_veh(void* handle) {
+    if (handle) RemoveVectoredExceptionHandler(handle);
+}
+
+// hardware breakpoint (thread-local)
+static int hook_hw_breakpoint_set(HANDLE thread, void* addr) {
+    if (!thread || !addr) return 0;
+    CONTEXT ctx;
+    ZeroMemory(&ctx, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    if (!GetThreadContext(thread, &ctx)) return 0;
+    ctx.Dr0 = (DWORD_PTR)addr;
+    ctx.Dr7 |= 1;
+    return SetThreadContext(thread, &ctx) != 0;
+}
+
+static int hook_hw_breakpoint_clear(HANDLE thread) {
+    if (!thread) return 0;
+    CONTEXT ctx;
+    ZeroMemory(&ctx, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    if (!GetThreadContext(thread, &ctx)) return 0;
+    ctx.Dr0 = 0;
+    ctx.Dr7 &= ~1u;
+    return SetThreadContext(thread, &ctx) != 0;
+}
+
 typedef void (*hook_log_fn)(const char* tag, const char* msg);
 
 static hook_log_fn g_hook_log = NULL;
@@ -153,6 +234,17 @@ static void hook_log(const char* tag, const char* msg) {
 }
 
 // forward declarations for early helpers
+// crc32 of a module section
+static uint32_t hook_crc_section(const char* module, const char* section) {
+    void* base = NULL;
+    size_t size = 0;
+    if (!hook_module_bounds(module, &base, &size)) return 0;
+    void* sec_base = NULL;
+    size_t sec_size = 0;
+    if (!hook_find_section(base, section, &sec_base, &sec_size)) return 0;
+    return tinyhook_crc32(sec_base, sec_size);
+}
+
 static uint32_t tinyhook_crc32(const void* data, size_t len);
 static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask);
 
@@ -191,6 +283,11 @@ static void* hook_resolve_export(const char* module, const char* name, uint16_t 
     if (name) return (void*)GetProcAddress(mod, name);
     if (ordinal) return (void*)GetProcAddress(mod, (LPCSTR)(uintptr_t)ordinal);
     return NULL;
+}
+
+// pdb resolver stub (user integrates dbghelp/symsrv)
+static void* hook_resolve_symbol_pdb(const char* module, const char* symbol) {
+    return hook_resolve_symbol(module, symbol);
 }
 
 static void* hook_resolve_symbol(const char* module, const char* symbol) {
@@ -329,6 +426,13 @@ static void* hook_pattern_scan_section(void* module_base, const char* section, c
 static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask);
 
 // pattern scan with module auto-bounds
+// rescan a pattern after module reload
+static void* hook_rescan_after_module(const char* module, const uint8_t* pattern, const char* mask, int tries, int sleep_ms) {
+    HMODULE h = hook_wait_for_module(module, tries, sleep_ms);
+    if (!h) return NULL;
+    return hook_pattern_scan_module_auto(module, pattern, mask);
+}
+
 static void* hook_pattern_scan_module_auto(const char* module, const uint8_t* pattern, const char* mask) {
     void* base = NULL;
     size_t size = 0;
@@ -356,6 +460,12 @@ static void* hook_pattern_scan_module(void* module_base, size_t module_size, con
 
 // helpers
 // ------------------------------------------------------------
+// minimal prologue length (stub, user may replace with disasm)
+static size_t hook_min_prologue_len(void* addr) {
+    (void)addr;
+    return 5;
+}
+
 static inline int th_rel32_fit(void* src, void* dst) {
     intptr_t delta = (intptr_t)dst - ((intptr_t)src + 5);
     return (delta >= INT32_MIN && delta <= INT32_MAX);
