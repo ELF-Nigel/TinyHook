@@ -244,3 +244,29 @@ void* fn = hook_pattern_scan_module(base, size, pattern, mask);
 // call from dllmain
 hook_on_dll_detach();
 ```
+
+## Auto-Resolvers
+### Module export
+```cpp
+void* fn = hook_resolve_export("kernel32.dll", "CreateFileW", 0);
+```
+
+### Pattern scan (auto module bounds)
+```cpp
+void* fn = hook_pattern_scan_module_auto("game.dll", pattern, mask);
+```
+
+### IL2CPP resolver (user-supplied)
+```cpp
+void* fn = hook_il2cpp_resolve_method(my_resolver, "", "Player", "Update", 0);
+```
+
+### Unreal resolver (user-supplied)
+```cpp
+void* fn = hook_unreal_resolve_function(my_resolver, "Class /Script/Game.MyClass", "Tick");
+```
+
+### DXGI swapchain
+```cpp
+IDXGISwapChain* sc = hook_dxgi_find_swapchain(hwnd);
+```

@@ -122,6 +122,22 @@ static int hook_is_module_allowed(void* addr) {
     return 0;
 }
 
+// il2cpp resolver stub (requires user to provide a resolver function)
+typedef void* (*hook_il2cpp_resolver_fn)(const char* namesp, const char* klass, const char* method, int args);
+
+static void* hook_il2cpp_resolve_method(hook_il2cpp_resolver_fn fn, const char* namesp, const char* klass, const char* method, int args) {
+    if (!fn) return NULL;
+    return fn(namesp, klass, method, args);
+}
+
+// unreal resolver stub (user provides resolver)
+typedef void* (*hook_unreal_resolver_fn)(const char* object_path, const char* function_name);
+
+static void* hook_unreal_resolve_function(hook_unreal_resolver_fn fn, const char* object_path, const char* function_name) {
+    if (!fn) return NULL;
+    return fn(object_path, function_name);
+}
+
 typedef void (*hook_log_fn)(const char* tag, const char* msg);
 
 static hook_log_fn g_hook_log = NULL;
@@ -136,6 +152,15 @@ static void hook_log(const char* tag, const char* msg) {
 
 // call this from dllmain to auto-disable hooks on detach
 // optional symbol resolver (dbghelp)
+// resolve export by name or ordinal
+static void* hook_resolve_export(const char* module, const char* name, uint16_t ordinal) {
+    HMODULE mod = GetModuleHandleA(module);
+    if (!mod) return NULL;
+    if (name) return (void*)GetProcAddress(mod, name);
+    if (ordinal) return (void*)GetProcAddress(mod, (LPCSTR)(uintptr_t)ordinal);
+    return NULL;
+}
+
 static void* hook_resolve_symbol(const char* module, const char* symbol) {
     if (!module || !symbol) return NULL;
     HMODULE mod = GetModuleHandleA(module);
@@ -207,6 +232,26 @@ static uint32_t tinyhook_crc32_target5(void* target) {
 }
 
 // generic module pattern scan
+// module bounds helper
+static int hook_module_bounds(const char* module, void** out_base, size_t* out_size) {
+    if (!module || !out_base || !out_size) return 0;
+    HMODULE mod = GetModuleHandleA(module);
+    if (!mod) return 0;
+    MODULEINFO mi;
+    if (!GetModuleInformation(GetCurrentProcess(), mod, &mi, sizeof(mi))) return 0;
+    *out_base = mi.lpBaseOfDll;
+    *out_size = (size_t)mi.SizeOfImage;
+    return 1;
+}
+
+// pattern scan with module auto-bounds
+static void* hook_pattern_scan_module_auto(const char* module, const uint8_t* pattern, const char* mask) {
+    void* base = NULL;
+    size_t size = 0;
+    if (!hook_module_bounds(module, &base, &size)) return NULL;
+    return hook_pattern_scan_module(base, size, pattern, mask);
+}
+
 static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask) {
     if (!module_base || !module_size || !pattern || !mask) return NULL;
     size_t pat_len = 0;
@@ -1509,6 +1554,31 @@ static LRESULT CALLBACK vmt_dxgi_dummy_wndproc(HWND h, UINT m, WPARAM w, LPARAM 
 }
 
 // vmt_dxgi_create_dummy_swapchain helper
+// create a dummy dxgi swapchain for a hwnd and return it
+static IDXGISwapChain* hook_dxgi_find_swapchain(HWND hwnd) {
+    if (!hwnd) return NULL;
+    DXGI_SWAP_CHAIN_DESC sd;
+    ZeroMemory(&sd, sizeof(sd));
+    sd.BufferCount = 2;
+    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.OutputWindow = hwnd;
+    sd.SampleDesc.Count = 1;
+    sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    ID3D11Device* dev = NULL;
+    ID3D11DeviceContext* ctx = NULL;
+    IDXGISwapChain* sc = NULL;
+    D3D_FEATURE_LEVEL fl;
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0,
+        NULL, 0, D3D11_SDK_VERSION, &sd, &sc, &dev, &fl, &ctx);
+    if (FAILED(hr)) return NULL;
+    if (ctx) ctx->Release();
+    if (dev) dev->Release();
+    return sc;
+}
+
 static int vmt_dxgi_create_dummy_swapchain(vmt_dxgi_dummy_t* out) {
     if (!out) return 0;
     ZeroMemory(out, sizeof(*out));
