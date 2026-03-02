@@ -286,6 +286,8 @@ static uint32_t hook_module_integrity_tick(const char* module, const char* secti
     return hook_crc_section(module, section);
 }
 
+// crc32 of a module section
+static uint32_t hook_crc_section(const char* module, const char* section) {
     void* base = NULL;
     size_t size = 0;
     if (!hook_module_bounds(module, &base, &size)) return 0;
@@ -399,6 +401,7 @@ static void* hook_resolve_syscall(const char* name) {
     return hook_resolve_export("ntdll.dll", name, 0);
 }
 
+static void* hook_resolve_export(const char* module, const char* name, uint16_t ordinal) {
     HMODULE mod = GetModuleHandleA(module);
     if (!mod) return NULL;
     if (name) return (void*)GetProcAddress(mod, name);
