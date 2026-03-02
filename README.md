@@ -1,5 +1,7 @@
 # TinyHook
 
+TinyHook is a single-header, Windows x64 hooking toolkit that combines reliable 5-byte detours, VMT hooks, and a large set of advanced helpers (IAT/EAT, code-caves, auto-resolvers, integrity checks, watchdogs, and diagnostics) without external dependencies by default. It is designed for IL2CPP/AOT stubs, game rendering hooks, and custom tooling where fast iteration and a self-contained header are preferred.
+
 Single-header TinyHook + VMT hook utilities for Windows x64.
 
 ## Files
