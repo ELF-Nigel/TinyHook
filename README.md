@@ -332,3 +332,24 @@ Then use:
 ```cpp
 size_t len = hook_min_prologue_len_disasm(target, 5);
 ```
+
+### EAT Hooking
+```cpp
+void* orig = NULL;
+hook_eat_patch("user32.dll", "MessageBoxA", (void*)MyMsgBoxA, &orig);
+```
+
+### Watchdog
+```cpp
+hook_watchdog_start();
+// ...
+hook_watchdog_stop();
+```
+
+### Transactions
+```cpp
+hook_tx_t tx = {0};
+hook_tx_begin(&tx);
+// apply multiple hooks
+hook_tx_end(&tx);
+```

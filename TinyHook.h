@@ -194,6 +194,21 @@ static int hook_iat_patch(void** entry, void* detour, void** out_original) {
 }
 
 // veh/guard page hook (simplified)
+// page guard helpers
+static int hook_page_guard_set(void* addr, size_t len, DWORD* old) {
+    if (!addr || !len) return 0;
+    DWORD prot;
+    if (!VirtualProtect(addr, len, PAGE_EXECUTE_READ | PAGE_GUARD, &prot)) return 0;
+    if (old) *old = prot;
+    return 1;
+}
+
+static int hook_page_guard_clear(void* addr, size_t len, DWORD old) {
+    if (!addr || !len) return 0;
+    DWORD tmp;
+    return VirtualProtect(addr, len, old, &tmp) != 0;
+}
+
 static LONG CALLBACK hook_veh_guard(EXCEPTION_POINTERS* ep) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -253,6 +268,32 @@ static uint32_t hook_crc_section(const char* module, const char* section) {
     return tinyhook_crc32(sec_base, sec_size);
 }
 
+// safe memory helpers
+static int hook_safe_read(void* addr, void* out, size_t len) {
+    if (!addr || !out || !len) return 0;
+    __try {
+        memcpy(out, addr, len);
+        return 1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
+static int hook_safe_write(void* addr, const void* data, size_t len) {
+    if (!addr || !data || !len) return 0;
+    DWORD old;
+    if (!VirtualProtect(addr, len, PAGE_EXECUTE_READWRITE, &old)) return 0;
+    __try {
+        memcpy(addr, data, len);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        VirtualProtect(addr, len, old, &old);
+        return 0;
+    }
+    VirtualProtect(addr, len, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), addr, len);
+    return 1;
+}
+
 static uint32_t tinyhook_crc32(const void* data, size_t len);
 static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask);
 
@@ -260,6 +301,37 @@ static void* hook_pattern_scan_module(void* module_base, size_t module_size, con
 // optional symbol resolver (dbghelp)
 // resolve export by name or ordinal
 // resolve export by crc32 of name
+// export address table hook (name)
+static int hook_eat_patch(const char* module, const char* name, void* detour, void** out_original) {
+    if (!module || !name || !detour) return 0;
+    HMODULE mod = GetModuleHandleA(module);
+    if (!mod) return 0;
+    uint8_t* base = (uint8_t*)mod;
+    IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (!dir.VirtualAddress) return 0;
+    IMAGE_EXPORT_DIRECTORY* exp = (IMAGE_EXPORT_DIRECTORY*)(base + dir.VirtualAddress);
+    DWORD* names = (DWORD*)(base + exp->AddressOfNames);
+    WORD* ords = (WORD*)(base + exp->AddressOfNameOrdinals);
+    DWORD* funcs = (DWORD*)(base + exp->AddressOfFunctions);
+    for (DWORD i = 0; i < exp->NumberOfNames; ++i) {
+        const char* n = (const char*)(base + names[i]);
+        if (strcmp(n, name) == 0) {
+            WORD ord = ords[i];
+            DWORD old;
+            if (!VirtualProtect(&funcs[ord], sizeof(DWORD), PAGE_READWRITE, &old)) return 0;
+            if (out_original) *out_original = (void*)(base + funcs[ord]);
+            funcs[ord] = (DWORD)((uint8_t*)detour - base);
+            VirtualProtect(&funcs[ord], sizeof(DWORD), old, &old);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void* hook_resolve_export_hash(const char* module, uint32_t name_crc32) {
     if (!module) return NULL;
     HMODULE mod = GetModuleHandleA(module);
@@ -1753,6 +1825,39 @@ static void vmt_registry_disable_all(void) {
     AcquireSRWLockShared(&r->lock);
     for (size_t i = 0; i < r->count; ++i) vmt_hook_disable(r->hooks[i]);
     ReleaseSRWLockShared(&r->lock);
+}
+
+// hook watchdog (periodic reapply)
+static HANDLE g_hook_watchdog = NULL;
+static volatile LONG g_hook_watchdog_run = 0;
+
+static DWORD WINAPI hook_watchdog_thread(LPVOID param) {
+    (void)param;
+    while (InterlockedCompareExchange(&g_hook_watchdog_run, 1, 1)) {
+        tinyhook_registry_t* r = tinyhook_registry_instance();
+        AcquireSRWLockShared(&r->lock);
+        for (size_t i = 0; i < r->count; ++i) {
+            tinyhook_reapply_if_needed(r->hooks[i]);
+        }
+        ReleaseSRWLockShared(&r->lock);
+        Sleep(1000);
+    }
+    return 0;
+}
+
+static int hook_watchdog_start(void) {
+    if (g_hook_watchdog) return 1;
+    InterlockedExchange(&g_hook_watchdog_run, 1);
+    g_hook_watchdog = CreateThread(NULL, 0, hook_watchdog_thread, NULL, 0, NULL);
+    return g_hook_watchdog != NULL;
+}
+
+static void hook_watchdog_stop(void) {
+    if (!g_hook_watchdog) return;
+    InterlockedExchange(&g_hook_watchdog_run, 0);
+    WaitForSingleObject(g_hook_watchdog, 2000);
+    CloseHandle(g_hook_watchdog);
+    g_hook_watchdog = NULL;
 }
 
 static void hook_on_dll_detach(void) {
