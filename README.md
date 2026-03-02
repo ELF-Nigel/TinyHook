@@ -93,3 +93,35 @@ hook_logf("tinyhook", "status=%s", tinyhook_status_str(st));
 ## Credits
 Discord: chefendpoint
 Telegram: ELF_Nigel
+
+## Changelog
+- 2026-03-02: initial public release (single header + docs).
+- 2026-03-02: improved logging and diagnostics.
+
+## API Reference
+### Tinyhook Core
+- `tinyhook_create_ex` — create hook with flags
+- `tinyhook_enable`, `tinyhook_disable`, `tinyhook_destroy`
+- `tinyhook_create_safe` — includes executable verification
+- `tinyhook_auto`, `tinyhook_auto_chain`, `tinyhook_auto_unhook`
+- `tinyhook_simple`, `tinyhook_batch`
+- `tinyhook_default_flags`, `tinyhook_status_str`
+
+### Tinyhook Flags
+- `TH_FLAG_VERIFY_STUB`
+- `TH_FLAG_RESOLVE_CHAIN`
+- `TH_FLAG_VERIFY_EXEC`
+- `TH_FLAG_SUSPEND_THREADS`
+- `TH_FLAG_ALLOW_RAW_TRAMP`
+
+### VMT Core
+- `vmt_hook_create`, `vmt_hook_enable`, `vmt_hook_disable`, `vmt_hook_destroy`
+- `vmt_hook_enable_ex`, `vmt_hook_disable_ex`
+- `vmt_shadow_create`, `vmt_shadow_enable`, `vmt_shadow_disable`
+- `vmt_shadow_create_auto`, `vmt_shadow_auto`
+- `vmt_hook_auto`, `vmt_hook_auto_ex`, `vmt_hook_simple`, `vmt_hook_batch`
+- `vmt_registry_add`, `vmt_registry_enable_all`, `vmt_registry_disable_all`
+
+### Optional DXGI/DX12
+- Enable with `#define VMT_DXGI_HELPERS` / `#define VMT_DX12_HELPERS`
+- Dummy swapchain helpers + index resolution + auto hook helpers
