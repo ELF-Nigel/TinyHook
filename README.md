@@ -371,3 +371,9 @@ mgr.watchdog_enabled = 1;
 mgr.priority_enable = 1;
 hook_manager_enable_all(&mgr);
 ```
+
+## Hook Metadata
+```cpp
+hook_meta_t meta = {"present", "render", 5, 1000, 0};
+hook_manager_bind_meta_tiny(&hk, &meta);
+```

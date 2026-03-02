@@ -1888,11 +1888,44 @@ static void hook_watchdog_stop(void) {
 }
 
 // hook manager (central control)
+// hook metadata
+typedef struct hook_meta_t {
+    const char* name;
+    const char* category;
+    int priority;
+    int cooldown_ms;
+    uint64_t last_tick;
+} hook_meta_t;
+
+static uint64_t hook_get_tick_ms(void) {
+    return GetTickCount64();
+}
+
+static int hook_meta_can_run(hook_meta_t* m) {
+    if (!m) return 1;
+    if (m->cooldown_ms <= 0) return 1;
+    uint64_t now = hook_get_tick_ms();
+    if (now - m->last_tick < (uint64_t)m->cooldown_ms) return 0;
+    m->last_tick = now;
+    return 1;
+}
+
 typedef struct hook_manager_t {
     int watchdog_enabled;
     int suspend_threads;
     int priority_enable;
 } hook_manager_t;
+
+// bind metadata to hooks (optional)
+static void hook_manager_bind_meta_tiny(tinyhook_t* h, hook_meta_t* meta) {
+    if (!h || !meta) return;
+    h->priority = meta->priority;
+}
+
+static void hook_manager_bind_meta_vmt(vmt_hook_t* h, hook_meta_t* meta) {
+    if (!h || !meta) return;
+    h->priority = meta->priority;
+}
 
 static void hook_manager_init(hook_manager_t* m) {
     if (!m) return;
