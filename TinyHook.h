@@ -154,6 +154,32 @@ static void hook_log(const char* tag, const char* msg) {
 // call this from dllmain to auto-disable hooks on detach
 // optional symbol resolver (dbghelp)
 // resolve export by name or ordinal
+// resolve export by crc32 of name
+static void* hook_resolve_export_hash(const char* module, uint32_t name_crc32) {
+    if (!module) return NULL;
+    HMODULE mod = GetModuleHandleA(module);
+    if (!mod) return NULL;
+    uint8_t* base = (uint8_t*)mod;
+    IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return NULL;
+    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (!dir.VirtualAddress) return NULL;
+    IMAGE_EXPORT_DIRECTORY* exp = (IMAGE_EXPORT_DIRECTORY*)(base + dir.VirtualAddress);
+    DWORD* names = (DWORD*)(base + exp->AddressOfNames);
+    WORD* ords = (WORD*)(base + exp->AddressOfNameOrdinals);
+    DWORD* funcs = (DWORD*)(base + exp->AddressOfFunctions);
+    for (DWORD i = 0; i < exp->NumberOfNames; ++i) {
+        const char* n = (const char*)(base + names[i]);
+        if (tinyhook_crc32(n, (size_t)strlen(n)) == name_crc32) {
+            WORD ord = ords[i];
+            return (void*)(base + funcs[ord]);
+        }
+    }
+    return NULL;
+}
+
 static void* hook_resolve_export(const char* module, const char* name, uint16_t ordinal) {
     HMODULE mod = GetModuleHandleA(module);
     if (!mod) return NULL;
@@ -234,6 +260,25 @@ static uint32_t tinyhook_crc32_target5(void* target) {
 
 // generic module pattern scan
 // module bounds helper
+// wait for a module to load (poll)
+static HMODULE hook_wait_for_module(const char* module, int tries, int sleep_ms) {
+    if (!module) return NULL;
+    for (int i = 0; i < tries; ++i) {
+        HMODULE h = GetModuleHandleA(module);
+        if (h) return h;
+        Sleep(sleep_ms);
+    }
+    return NULL;
+}
+
+// enumerate modules in current process (returns count)
+static size_t hook_enum_modules(HMODULE* out, size_t cap) {
+    if (!out || cap == 0) return 0;
+    DWORD needed = 0;
+    if (!EnumProcessModules(GetCurrentProcess(), out, (DWORD)(cap * sizeof(HMODULE)), &needed)) return 0;
+    return (size_t)(needed / sizeof(HMODULE));
+}
+
 static int hook_module_bounds(const char* module, void** out_base, size_t* out_size) {
     if (!module || !out_base || !out_size) return 0;
     HMODULE mod = GetModuleHandleA(module);
@@ -247,6 +292,35 @@ static int hook_module_bounds(const char* module, void** out_base, size_t* out_s
 
 // pattern scan with module auto-bounds
 // forward declaration
+// find a module section by name
+static int hook_find_section(void* module_base, const char* name, void** out_base, size_t* out_size) {
+    if (!module_base || !name || !out_base || !out_size) return 0;
+    uint8_t* base = (uint8_t*)module_base;
+    IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+    IMAGE_SECTION_HEADER* sec = (IMAGE_SECTION_HEADER*)((uint8_t*)&nt->OptionalHeader + nt->FileHeader.SizeOfOptionalHeader);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+        char secname[9] = {0};
+        memcpy(secname, sec[i].Name, 8);
+        if (_stricmp(secname, name) == 0) {
+            *out_base = base + sec[i].VirtualAddress;
+            *out_size = (size_t)sec[i].Misc.VirtualSize;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// pattern scan within a module section
+static void* hook_pattern_scan_section(void* module_base, const char* section, const uint8_t* pattern, const char* mask) {
+    void* base = NULL;
+    size_t size = 0;
+    if (!hook_find_section(module_base, section, &base, &size)) return NULL;
+    return hook_pattern_scan_module(base, size, pattern, mask);
+}
+
 static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask);
 
 // pattern scan with module auto-bounds

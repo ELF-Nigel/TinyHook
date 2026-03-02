@@ -270,3 +270,25 @@ void* fn = hook_unreal_resolve_function(my_resolver, "Class /Script/Game.MyClass
 ```cpp
 IDXGISwapChain* sc = hook_dxgi_find_swapchain(hwnd);
 ```
+
+### Module section scan
+```cpp
+void* fn = hook_pattern_scan_section(base, ".text", pattern, mask);
+```
+
+### Export by hash
+```cpp
+uint32_t crc = tinyhook_crc32("CreateFileW", 11);
+void* fn = hook_resolve_export_hash("kernel32.dll", crc);
+```
+
+### Wait for module
+```cpp
+HMODULE h = hook_wait_for_module("game.dll", 100, 50);
+```
+
+### Enumerate modules
+```cpp
+HMODULE mods[256];
+size_t count = hook_enum_modules(mods, 256);
+```
