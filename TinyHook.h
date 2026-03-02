@@ -29,6 +29,19 @@
 
 #include <tlhelp32.h>
 
+// config switches
+#ifndef HOOK_CFG_ENABLE_WATCHDOG
+#define HOOK_CFG_ENABLE_WATCHDOG 1
+#endif
+
+#ifndef HOOK_CFG_ENABLE_IAT
+#define HOOK_CFG_ENABLE_IAT 1
+#endif
+
+#ifndef HOOK_CFG_ENABLE_EAT
+#define HOOK_CFG_ENABLE_EAT 1
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -266,6 +279,11 @@ static void* hook_pattern_scan_module_auto(const char* module, const uint8_t* pa
 static void vmt_registry_destroy_all(void);
 
 // crc32 of a module section
+// module integrity watchdog
+static uint32_t hook_module_integrity_tick(const char* module, const char* section) {
+    return hook_crc_section(module, section);
+}
+
 static uint32_t hook_crc_section(const char* module, const char* section) {
     void* base = NULL;
     size_t size = 0;
@@ -373,6 +391,11 @@ static void* hook_resolve_export_hash(const char* module, uint32_t name_crc32) {
         }
     }
     return NULL;
+}
+
+// syscall resolver (ntdll stub)
+static void* hook_resolve_syscall(const char* name) {
+    return hook_resolve_export("ntdll.dll", name, 0);
 }
 
 static void* hook_resolve_export(const char* module, const char* name, uint16_t ordinal) {
@@ -663,6 +686,16 @@ static size_t hook_min_prologue_len_disasm(void* addr, size_t min_len) {
     (void)min_len;
     return 5;
 #endif
+}
+
+// select jump type (rel32 vs abs)
+static int hook_can_rel32(void* src, void* dst) {
+    intptr_t delta = (intptr_t)dst - ((intptr_t)src + 5);
+    return (delta >= INT32_MIN && delta <= INT32_MAX);
+}
+
+static size_t hook_select_jump(void* src, void* dst) {
+    return hook_can_rel32(src, dst) ? 5 : 12;
 }
 
 static inline int th_rel32_fit(void* src, void* dst) {
@@ -2054,6 +2087,41 @@ static void hook_manager_destroy_all(hook_manager_t* m) {
 }
 
 // dump active hooks to logger
+// hook profiling helpers
+typedef struct hook_profile_t {
+    uint64_t start;
+    uint64_t elapsed;
+} hook_profile_t;
+
+static uint64_t hook_qpc(void) {
+    LARGE_INTEGER li;
+    QueryPerformanceCounter(&li);
+    return (uint64_t)li.QuadPart;
+}
+
+static uint64_t hook_qpf(void) {
+    LARGE_INTEGER li;
+    QueryPerformanceFrequency(&li);
+    return (uint64_t)li.QuadPart;
+}
+
+static void hook_profile_begin(hook_profile_t* p) {
+    if (!p) return;
+    p->start = hook_qpc();
+}
+
+static void hook_profile_end(hook_profile_t* p) {
+    if (!p) return;
+    uint64_t end = hook_qpc();
+    p->elapsed = end - p->start;
+}
+
+static double hook_profile_ms(hook_profile_t* p) {
+    if (!p) return 0.0;
+    double freq = (double)hook_qpf();
+    return (p->elapsed * 1000.0) / freq;
+}
+
 static void hook_dump_active(void) {
     tinyhook_registry_t* tr = tinyhook_registry_instance();
     AcquireSRWLockShared(&tr->lock);

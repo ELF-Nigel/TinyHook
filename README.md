@@ -393,3 +393,16 @@ hook_dump_active();
 ```cpp
 void* fn = hook_resolve_symbol_cached("kernel32.dll", "CreateFileW");
 ```
+
+## Syscall Proxy
+```cpp
+void* ntOpen = hook_resolve_syscall("NtOpenProcess");
+```
+
+## Hook Profiling
+```cpp
+hook_profile_t p;
+hook_profile_begin(&p);
+// call detour
+hook_profile_end(&p);
+```
