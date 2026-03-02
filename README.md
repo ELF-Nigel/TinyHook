@@ -322,3 +322,13 @@ uint32_t crc = hook_crc_section("game.dll", ".text");
 ```cpp
 void* fn = hook_rescan_after_module("game.dll", pattern, mask, 200, 50);
 ```
+
+## Disassembler Support (Optional)
+Define one of these before including `TinyHook.h`:
+- `HOOK_USE_ZYDIS`
+- `HOOK_USE_CAPSTONE`
+
+Then use:
+```cpp
+size_t len = hook_min_prologue_len_disasm(target, 5);
+```

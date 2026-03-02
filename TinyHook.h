@@ -19,6 +19,14 @@
 #include <stdio.h>
 #include <psapi.h>
 #include <string.h>
+// optional disassembler support
+#ifdef HOOK_USE_ZYDIS
+#include <Zydis/Zydis.h>
+#endif
+#ifdef HOOK_USE_CAPSTONE
+#include <capstone/capstone.h>
+#endif
+
 #include <tlhelp32.h>
 
 #ifdef __cplusplus
@@ -464,6 +472,39 @@ static void* hook_pattern_scan_module(void* module_base, size_t module_size, con
 static size_t hook_min_prologue_len(void* addr) {
     (void)addr;
     return 5;
+}
+
+// disassembler-based prologue length (optional)
+static size_t hook_min_prologue_len_disasm(void* addr, size_t min_len) {
+    if (!addr) return 0;
+#ifdef HOOK_USE_ZYDIS
+    ZydisDecoder dec;
+    ZydisDecoderInit(&dec, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64);
+    size_t off = 0;
+    while (off < min_len) {
+        ZydisDecodedInstruction ins;
+        if (ZYDIS_SUCCESS != ZydisDecoderDecodeBuffer(&dec, (uint8_t*)addr + off, 32, &ins)) break;
+        off += ins.length;
+    }
+    return off ? off : min_len;
+#elif defined(HOOK_USE_CAPSTONE)
+    csh handle;
+    if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK) return min_len;
+    cs_option(handle, CS_OPT_DETAIL, CS_OPT_OFF);
+    size_t off = 0;
+    cs_insn* insn = NULL;
+    while (off < min_len) {
+        size_t count = cs_disasm(handle, (uint8_t*)addr + off, 32, (uint64_t)addr + off, 1, &insn);
+        if (count == 0) break;
+        off += insn[0].size;
+        cs_free(insn, count);
+    }
+    cs_close(&handle);
+    return off ? off : min_len;
+#else
+    (void)min_len;
+    return 5;
+#endif
 }
 
 static inline int th_rel32_fit(void* src, void* dst) {
