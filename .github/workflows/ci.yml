@@ -24,3 +24,5 @@ jobs:
           echo #include "TinyHook.h" >> test_features.cpp
           echo int main(){ return 0; } >> test_features.cpp
           cl /nologo /W3 /EHsc test_features.cpp
+          cl /nologo /W4 /permissive- /EHsc test_features.cpp
+          clang-cl /W3 /EHsc test_features.cpp
