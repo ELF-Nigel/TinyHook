@@ -1255,6 +1255,9 @@ static int vmt_verify_entry(vmt_hook_t* h, void* expected) {
     return h->vtable[h->index] == expected;
 }
 
+// forward decl for hot reload
+static int vmt_hook_disable_ex(vmt_hook_t* h, int suspend_threads);
+
 // hot-reload vmt hook (detour change)
 static int vmt_hook_hot_reload(vmt_hook_t* h, void* new_detour, int suspend_threads) {
     if (!h || !h->obj || !new_detour) return 0;
@@ -1485,8 +1488,14 @@ static void vmt_registry_destroy_all(void) {
 }
 
 #ifdef VMT_DXGI_HELPERS
+#ifdef __cplusplus
+} // extern "c"
+#endif
 #include <dxgi.h>
 #include <d3d11.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct vmt_dxgi_dummy_t {
     HWND hwnd;
@@ -1643,11 +1652,19 @@ static int vmt_dxgi_hook_swapchain_shadow(IDXGISwapChain* sc,
     if (resize_detour) vmt_shadow_hook(shadow, resize, resize_detour, out_resize_orig);
     return vmt_shadow_enable(shadow);
 }
+
+
 #endif
 
 #ifdef VMT_DX12_HELPERS
+#ifdef __cplusplus
+} // extern "c"
+#endif
 #include <d3d12.h>
 #include <dxgi1_4.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct vmt_dx12_dummy_t {
     HWND hwnd;
