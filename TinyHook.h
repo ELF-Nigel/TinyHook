@@ -263,7 +263,6 @@ static int hook_find_section(void* module_base, const char* name, void** out_bas
 static void* hook_resolve_symbol(const char* module, const char* symbol);
 static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask);
 static void* hook_pattern_scan_module_auto(const char* module, const uint8_t* pattern, const char* mask);
-static int tinyhook_reapply_if_needed(tinyhook_t* h);
 static void vmt_registry_destroy_all(void);
 
 // crc32 of a module section
@@ -424,6 +423,9 @@ typedef struct tinyhook_t {
     int enabled;
     int priority;
 } tinyhook_t;
+
+static int tinyhook_reapply_if_needed(tinyhook_t* h);
+
 
 // forward declarations (tinyhook)
 static int th_safe_read_ptr(void* addr, void** out);
