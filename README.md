@@ -353,3 +353,21 @@ hook_tx_begin(&tx);
 // apply multiple hooks
 hook_tx_end(&tx);
 ```
+
+## Code Cave Helpers
+```cpp
+void* cave = hook_find_codecave_module("game.dll", 64);
+if (cave) {
+    uint8_t bytes[5] = {0x90,0x90,0x90,0x90,0x90};
+    hook_write_codecave(cave, bytes, sizeof(bytes));
+}
+```
+
+## Hook Manager
+```cpp
+hook_manager_t mgr;
+hook_manager_init(&mgr);
+mgr.watchdog_enabled = 1;
+mgr.priority_enable = 1;
+hook_manager_enable_all(&mgr);
+```

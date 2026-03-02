@@ -513,6 +513,33 @@ static void* hook_rescan_after_module(const char* module, const uint8_t* pattern
     return hook_pattern_scan_module_auto(module, pattern, mask);
 }
 
+// code cave helpers
+static void* hook_find_codecave(void* base, size_t size, size_t needed) {
+    if (!base || !size || !needed) return NULL;
+    uint8_t* p = (uint8_t*)base;
+    size_t run = 0;
+    for (size_t i = 0; i < size; ++i) {
+        if (p[i] == 0xCC || p[i] == 0x90) {
+            run++;
+            if (run >= needed) return p + i - run + 1;
+        } else {
+            run = 0;
+        }
+    }
+    return NULL;
+}
+
+static void* hook_find_codecave_module(const char* module, size_t needed) {
+    void* base = NULL;
+    size_t size = 0;
+    if (!hook_module_bounds(module, &base, &size)) return NULL;
+    return hook_find_codecave(base, size, needed);
+}
+
+static int hook_write_codecave(void* cave, const void* data, size_t len) {
+    return hook_safe_write(cave, data, len);
+}
+
 static void* hook_pattern_scan_module_auto(const char* module, const uint8_t* pattern, const char* mask) {
     void* base = NULL;
     size_t size = 0;
@@ -1858,6 +1885,46 @@ static void hook_watchdog_stop(void) {
     WaitForSingleObject(g_hook_watchdog, 2000);
     CloseHandle(g_hook_watchdog);
     g_hook_watchdog = NULL;
+}
+
+// hook manager (central control)
+typedef struct hook_manager_t {
+    int watchdog_enabled;
+    int suspend_threads;
+    int priority_enable;
+} hook_manager_t;
+
+static void hook_manager_init(hook_manager_t* m) {
+    if (!m) return;
+    m->watchdog_enabled = 0;
+    m->suspend_threads = 0;
+    m->priority_enable = 0;
+}
+
+static void hook_manager_enable_all(hook_manager_t* m) {
+    if (!m) return;
+    if (m->priority_enable) {
+        tinyhook_registry_enable_all_priority();
+        vmt_registry_enable_all_priority();
+    } else {
+        tinyhook_registry_enable_all();
+        vmt_registry_enable_all();
+    }
+    if (m->watchdog_enabled) hook_watchdog_start();
+}
+
+static void hook_manager_disable_all(hook_manager_t* m) {
+    (void)m;
+    hook_watchdog_stop();
+    tinyhook_registry_disable_all();
+    vmt_registry_disable_all();
+}
+
+static void hook_manager_destroy_all(hook_manager_t* m) {
+    (void)m;
+    hook_watchdog_stop();
+    tinyhook_registry_destroy_all();
+    vmt_registry_destroy_all();
 }
 
 static void hook_on_dll_detach(void) {
