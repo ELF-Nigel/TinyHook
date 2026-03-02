@@ -60,11 +60,6 @@ static void hook_log(const char* tag, const char* msg) {
 }
 
 // call this from dllmain to auto-disable hooks on detach
-static void hook_on_dll_detach(void) {
-    tinyhook_registry_disable_all();
-    vmt_registry_disable_all();
-}
-
 static void hook_logf(const char* tag, const char* fmt, ...) {
     if (!g_hook_log || !fmt) return;
     char buf[512];
@@ -1344,6 +1339,11 @@ static void vmt_registry_disable_all(void) {
     AcquireSRWLockShared(&r->lock);
     for (size_t i = 0; i < r->count; ++i) vmt_hook_disable(r->hooks[i]);
     ReleaseSRWLockShared(&r->lock);
+}
+
+static void hook_on_dll_detach(void) {
+    tinyhook_registry_disable_all();
+    vmt_registry_disable_all();
 }
 
 static void vmt_registry_destroy_all(void) {
