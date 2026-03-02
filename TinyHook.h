@@ -257,6 +257,15 @@ static void hook_log(const char* tag, const char* msg) {
 }
 
 // forward declarations for early helpers
+static uint32_t tinyhook_crc32(const void* data, size_t len);
+static int hook_module_bounds(const char* module, void** out_base, size_t* out_size);
+static int hook_find_section(void* module_base, const char* name, void** out_base, size_t* out_size);
+static void* hook_resolve_symbol(const char* module, const char* symbol);
+static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask);
+static void* hook_pattern_scan_module_auto(const char* module, const uint8_t* pattern, const char* mask);
+static int tinyhook_reapply_if_needed(tinyhook_t* h);
+static void vmt_registry_destroy_all(void);
+
 // crc32 of a module section
 static uint32_t hook_crc_section(const char* module, const char* section) {
     void* base = NULL;
