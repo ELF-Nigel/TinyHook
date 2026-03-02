@@ -164,3 +164,30 @@ if (vmt_dx12_resolve_indices_for_swapchain(sc3, &present, &resize)) {
     vmt_hook_enable(&hp);
 }
 ```
+
+### Vulkan
+- hook via `vkQueuePresentKHR` and/or swapchain functions.
+- prefer detouring export addresses or using a loader layer.
+- tinyhook can be used on exported function stubs if a 5-byte patch is safe.
+
+Example (export detour):
+```cpp
+// resolve vkQueuePresentKHR from vulkan-1.dll and detour with tinyhook
+```
+
+### OpenGL
+- hook `wglSwapBuffers` or `SwapBuffers` for present.
+- tinyhook works well on exported functions (ensure 5-byte patch is safe).
+
+Example:
+```cpp
+// resolve wglSwapBuffers from opengl32.dll and detour with tinyhook
+```
+
+## Injection Flow (Generic)
+1. inject your dll (manual map or CreateRemoteThread).
+2. wait for render device creation (dxgi/vk/wgl ready).
+3. resolve your target functions or swapchain pointers.
+4. install hooks (tinyhook/vmt) with thread suspend if needed.
+5. verify with logger and sanity checks.
+6. uninstall cleanly on detach.
