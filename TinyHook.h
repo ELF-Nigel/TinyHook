@@ -270,6 +270,8 @@ static void hook_log(const char* tag, const char* msg) {
 }
 
 // forward declarations for early helpers
+static uint32_t hook_crc_section(const char* module, const char* section);
+static void* hook_resolve_export(const char* module, const char* name, uint16_t ordinal);
 static uint32_t tinyhook_crc32(const void* data, size_t len);
 static int hook_module_bounds(const char* module, void** out_base, size_t* out_size);
 static int hook_find_section(void* module_base, const char* name, void** out_base, size_t* out_size);
@@ -284,7 +286,6 @@ static uint32_t hook_module_integrity_tick(const char* module, const char* secti
     return hook_crc_section(module, section);
 }
 
-static uint32_t hook_crc_section(const char* module, const char* section) {
     void* base = NULL;
     size_t size = 0;
     if (!hook_module_bounds(module, &base, &size)) return 0;
@@ -398,7 +399,6 @@ static void* hook_resolve_syscall(const char* name) {
     return hook_resolve_export("ntdll.dll", name, 0);
 }
 
-static void* hook_resolve_export(const char* module, const char* name, uint16_t ordinal) {
     HMODULE mod = GetModuleHandleA(module);
     if (!mod) return NULL;
     if (name) return (void*)GetProcAddress(mod, name);
