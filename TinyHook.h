@@ -18,6 +18,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <psapi.h>
+#include <string.h>
 #include <tlhelp32.h>
 
 #ifdef __cplusplus
@@ -150,6 +151,10 @@ static void hook_set_logger(hook_log_fn fn) {
 static void hook_log(const char* tag, const char* msg) {
     if (g_hook_log) g_hook_log(tag, msg);
 }
+
+// forward declarations for early helpers
+static uint32_t tinyhook_crc32(const void* data, size_t len);
+static void* hook_pattern_scan_module(void* module_base, size_t module_size, const uint8_t* pattern, const char* mask);
 
 // call this from dllmain to auto-disable hooks on detach
 // optional symbol resolver (dbghelp)
