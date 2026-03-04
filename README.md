@@ -104,7 +104,7 @@ hook_logf("tinyhook", "status=%s", tinyhook_status_str(st));
 ```
 
 ## Credits
-Discord: chefendpoint
+Discord: pb2j
 Telegram: ELF_Nigel
 
 ## Changelog
