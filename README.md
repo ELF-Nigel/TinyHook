@@ -6,6 +6,7 @@ Single-header TinyHook + VMT hook utilities for Windows x64.
 
 ## Files
 - `TinyHook.h` — single header with all features
+- `examples/` — minimal integration templates
 
 ## Features
 - hook priority system
@@ -102,6 +103,12 @@ hook_set_logger([](const char* tag, const char* msg){
 // formatted logging
 hook_logf("tinyhook", "status=%s", tinyhook_status_str(st));
 ```
+
+## Examples
+- `examples/minimal_detour.cpp` - tinyhook create/enable/disable
+- `examples/vmt_basic.cpp` - VMT hook create/enable/disable
+- `examples/iat_patch.c` - IAT hook patch and restore
+- `examples/README.md` - quick usage notes
 
 ## Credits
 Discord: pb2j
