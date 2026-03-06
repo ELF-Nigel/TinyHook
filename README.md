@@ -59,7 +59,7 @@ if (st == TH_OK) {
 vmt_hook_t vh = {0};
 vmt_hook_create(&vh, swapchain, 8, (void*)&MyPresent);
 vmt_hook_enable(&vh);
-``
+```
 
 ## Tinyhook API (common)
 - `tinyhook_create_ex`
@@ -106,6 +106,16 @@ hook_logf("tinyhook", "status=%s", tinyhook_status_str(st));
 ## Credits
 Discord: pb2j
 Telegram: ELF_Nigel
+
+## Maintainer SSH Deploy Key
+For write access from a server or automation host, create a dedicated SSH key pair and add the `.pub` key in:
+`GitHub -> Repo Settings -> Deploy keys -> Add deploy key` with **Allow write access** enabled.
+
+Then set repo-local SSH command:
+```bash
+git remote set-url origin git@github.com:ELF-Nigel/TinyHook.git
+git config core.sshCommand "ssh -i /path/to/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+```
 
 ## Changelog
 - 2026-03-02: added priority system, chaining, hot-reload, allow/deny list, symbol resolver.

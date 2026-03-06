@@ -1,0 +1,10 @@
+.keys/
+*.log
+*.tmp
+*.user
+*.suo
+*.VC.db
+.vs/
+x64/
+Debug/
+Release/
